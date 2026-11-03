@@ -1,0 +1,41 @@
+# Whole system in one resource: database, worker and bot.
+# Coolify fills the SERVICE_* values itself; you only set TELEGRAM_TOKEN. No model API is used.
+# The daily collection is a scheduled task in the worker container: python main.py collector
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=${SERVICE_USER_POSTGRES}
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_DB=legal_news
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d legal_news"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    build: .
+    environment:
+      - BLOCK=worker
+      - DATABASE_URL=postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/legal_news
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bot:
+    build: .
+    environment:
+      - SERVICE_FQDN_BOT_8080
+      - BLOCK=bot
+      - PORT=8080
+      - DATABASE_URL=postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/legal_news
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
