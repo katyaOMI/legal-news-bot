@@ -1,6 +1,6 @@
 # Whole system in one resource: database, worker and bot.
 # Coolify fills the SERVICE_* values itself; you only set TELEGRAM_TOKEN. No model API is used.
-# The daily collection is a scheduled task in the worker container: python main.py collector
+# Run the collector every three hours as a Coolify scheduled task in the worker container.
 services:
   postgres:
     image: postgres:17-alpine

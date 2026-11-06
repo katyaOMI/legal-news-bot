@@ -14,7 +14,7 @@ sys.path.insert(0,str(ROOT/'work/python-packages'))
 os.environ['DATABASE_URL']='postgresql://postgres@127.0.0.1:55432/postgres?sslmode=disable&connect_timeout=8'
 import db
 from collector import main as collector
-from collector.feeds import SOURCES, fetch_bytes,parse_rss
+from collector.feeds import SOURCES, dedup_key, fetch_bytes,parse_rss
 from worker import main as worker
 from bot import main as bot
 
@@ -35,11 +35,20 @@ def run():
     def fetch_and_save(url,since=None):
         body=fetch_bytes(url)
         saved[url]=body
-        return parse_rss(body,since)
+        items=parse_rss(body,since)
+        if url==SOURCES[0][1]:
+            items.append(dict(url='https://example.com/local-test-material',
+                title='Изменения в обработке персональных данных',
+                text='Локальная тестовая публикация для проверки цепочки доставки.',
+                published_at=datetime.now(timezone.utc).isoformat(),
+                dedup_key=dedup_key('Локальная тестовая публикация о персональных данных'),
+                metadata=dict(local_test_fixture=True)))
+        return items
     with db.connect() as conn:
         db.init_schema(conn)
-        # The sample uses today's already published items only in the test store.
-        conn.execute("UPDATE sources SET monitoring_started_at=date_trunc('day',now() AT TIME ZONE 'Europe/Moscow') AT TIME ZONE 'Europe/Moscow' WHERE kind='legal_rss'")
+        # Treat any current-year publication in the test feeds as a new item.
+        conn.execute("UPDATE sources SET monitoring_started_at=%s,archive_backfill_completed_at=now() WHERE kind='legal_rss'",
+                     (collector.year_start(),))
         conn.execute("INSERT INTO subscribers(chat_id,name,started_at) VALUES (1,'LOCAL TEST ONLY',now()-interval '1 day') ON CONFLICT DO NOTHING")
         conn.execute("INSERT INTO sources(name,kind,url) VALUES ('OLD AI TEST','hn','https://example.invalid/old-ai') ON CONFLICT DO NOTHING")
         source=conn.execute("SELECT id FROM sources WHERE name='OLD AI TEST'").fetchone()[0]

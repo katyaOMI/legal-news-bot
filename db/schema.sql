@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS subscribers (
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS monitoring_started_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ;
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS archive_backfill_completed_at TIMESTAMPTZ;
 UPDATE sources SET active = FALSE WHERE kind IN ('hn', 'arxiv', 'rss');
 INSERT INTO sources(name,kind,url) VALUES
  ('Официальное опубликование РФ','pravo','https://publication.pravo.gov.ru/api/Documents')
@@ -104,6 +105,7 @@ DO $$ BEGIN
  END IF;
 END $$;
 ALTER TABLE materials ADD COLUMN IF NOT EXISTS dedup_key TEXT;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS is_backfill BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE UNIQUE INDEX IF NOT EXISTS materials_dedup_key ON materials(dedup_key) WHERE dedup_key IS NOT NULL;
 CREATE TABLE IF NOT EXISTS material_mentions (
  material_id INTEGER NOT NULL REFERENCES materials(id),
@@ -117,3 +119,11 @@ INSERT INTO sources(name,kind,url) VALUES ('КонсультантПлюс: фе
 INSERT INTO sources(name,kind,url) VALUES ('КонсультантПлюс: новости для юриста','legal_rss','https://www.consultant.ru/rss/nw.xml') ON CONFLICT(name) DO NOTHING;
 INSERT INTO sources(name,kind,url) VALUES ('ГАРАНТ: новости','legal_rss','https://rss.garant.ru/categories/news/') ON CONFLICT(name) DO NOTHING;
 INSERT INTO sources(name,kind,url) VALUES ('ГАРАНТ: федеральные документы','legal_rss','https://rss.garant.ru/hotlaw/federal/') ON CONFLICT(name) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS weekly_digest_runs (
+ chat_id BIGINT NOT NULL REFERENCES subscribers(chat_id) ON DELETE CASCADE,
+ week_start DATE NOT NULL,
+ sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ item_count INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(chat_id,week_start)
+);
