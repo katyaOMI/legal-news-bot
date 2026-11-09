@@ -9,26 +9,43 @@ import sys
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from collector.survey import read_source, sources
+from collector.survey import classify_material, read_source, sources
 
 
-def run(limit=4):
+def run(limit=4,from_snapshot=False):
+    folder=ROOT/'work'
+    folder.mkdir(exist_ok=True)
+    fetched_at=None
     def check(source):
         result=read_source(source,limit=limit)
         return dict(source=source['name'],url=source['url'],**result)
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        results=list(pool.map(check,sources()))
+    if from_snapshot:
+        results=json.loads((folder/'survey-source-results.json').read_text(encoding='utf-8'))
+        if (folder/'survey-preview.json').exists():
+            fetched_at=json.loads((folder/'survey-preview.json').read_text(encoding='utf-8')).get('checked_at')
+            before=folder/'survey-preview-before-T4.html'
+            if not before.exists():
+                before.write_text((folder/'survey-preview.html').read_text(encoding='utf-8'),encoding='utf-8')
+        for result in results:
+            result['items']=[item for item in result['items'] if classify_material(item['title'],item['text'])]
+            for checked in result['checked']:
+                item=checked['item']
+                if item and not classify_material(item['title'],item['text']):
+                    checked['item']=None
+    else:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            results=list(pool.map(check,sources()))
     items=[]
     for result in results:
         for item in result['items']:
             # Only our short explanation and title are exported, not full article text.
             items.append({key:item[key] for key in ('url','title','published_at','topics','content_kind','usefulness')}|{'source':result['source']})
-    report=dict(checked_at=datetime.now(timezone.utc).isoformat(),telegram='not called',items=items,
+    report=dict(checked_at=fetched_at or datetime.now(timezone.utc).isoformat(),evaluated_at=datetime.now(timezone.utc).isoformat(),telegram='not called',items=items,
         sources=[dict(name=r['source'],url=r['url'],discovered=r['discovered'],checked=len(r['checked']),
             accepted=len(r['items']),errors=r['errors']) for r in results])
-    folder=ROOT/'work'
-    folder.mkdir(exist_ok=True)
-    (folder/'survey-source-results.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+    if not from_snapshot:
+        (folder/'survey-source-results.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+    (folder/'survey-effective-results.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
     (folder/'survey-preview.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     cards=[]
     for item in items:
@@ -42,7 +59,8 @@ def run(limit=4):
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--limit',type=int,default=4)
+    parser.add_argument('--from-snapshot',action='store_true',help='Re-evaluate saved public pages without network requests')
     args=parser.parse_args()
     if not 1<=args.limit<=10:
         parser.error('--limit must be between 1 and 10')
-    run(args.limit)
+    run(args.limit,args.from_snapshot)

@@ -18,7 +18,10 @@ from bot import main as bot
 
 def run():
     from psycopg import sql
-    snapshots=json.loads((ROOT/'work/survey-source-results.json').read_text(encoding='utf-8'))
+    snapshot_path=ROOT/'work/survey-effective-results.json'
+    if not snapshot_path.exists():
+        snapshot_path=ROOT/'work/survey-source-results.json'
+    snapshots=json.loads(snapshot_path.read_text(encoding='utf-8'))
     by_url={row['url']:row for row in snapshots}
     expected=sum(len(row['items']) for row in snapshots)
     assert expected>0,'Fetch the public preview first'

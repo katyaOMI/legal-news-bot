@@ -25,6 +25,9 @@ def classify_material(title, description=''):
     """Explain topic matches; general data regulation is relevant without 'survey'."""
     title = clean(title).lower().replace('ё', 'е')
     text = (title + ' ' + clean(description)[:4000]).lower().replace('ё', 'е')
+    # Owner feedback T4: sample-size calculations are outside this digest.
+    if re.search(r'сколько\s+(?:респондент|человек)|(?:размер|объем|численност)\w*\s+выборк|расчет\w*\s+(?:количеств\w*\s+)?респондент',title):
+        return None
     survey = re.search(r'опрос|анкет|респондент|\bnps\b|\benps\b|\bcustdev\b|survey|questionnaire|маркетингов\w* исследован', text)
     data = re.search(r'персональн\w* данн|152[‑–—-]фз|обезличиван|трансграничн\w* передач', text)
     # Avoid short generic pages, results-only headlines and unrelated data science.

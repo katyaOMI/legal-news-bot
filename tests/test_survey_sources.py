@@ -22,6 +22,13 @@ class SurveySourcesTests(unittest.TestCase):
                       'Итоги голосования за лучшую фотографию', 'Как заработать на опросах']:
             self.assertIsNone(classify_material(title),title)
 
+    def test_owner_rejected_sample_size_calculation_is_excluded(self):
+        for title in ['Сколько респондентов нужно для опроса: таблица',
+                      'Как рассчитать размер выборки для исследования']:
+            with self.subTest(title=title):
+                self.assertIsNone(classify_material(title,'Как провести онлайн-опрос и определить количество респондентов'))
+        self.assertIsNotNone(classify_material('Как защитить персональные данные респондентов'))
+
     def test_respondent_safety_and_description_participate(self):
         self.assertIsNotNone(classify_material('Как не стать жертвой мошенника','Безопасность респондентов в онлайн-опросах'))
         result=classify_material('Почему опасно зарабатывать на опросах','Как защитить персональные данные')
