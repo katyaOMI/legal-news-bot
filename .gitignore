@@ -28,3 +28,14 @@ __pycache__/
 .ruff_cache/
 .DS_Store
 Thumbs.db
+.ssh/
+.aws/
+id_rsa
+id_ed25519
+id_ecdsa
+id_dsa
+.netrc
+_netrc
+.npmrc
+.pypirc
+*.p8

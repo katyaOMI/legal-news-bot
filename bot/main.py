@@ -145,7 +145,7 @@ def send_source_events(conn):
             if error.code == 403:
                 conn.execute("DELETE FROM subscribers WHERE chat_id=%s",(chat_id,))
             blocked.add(chat_id)
-            db.log(SERVICE,f"Уведомление в чат {chat_id} не доставлено, код {error.code}")
+            db.log(SERVICE,f"Уведомление подписчику не доставлено, код {error.code}")
 
 
 def send_new(conn):
@@ -177,7 +177,7 @@ def send_new(conn):
             except urllib.error.HTTPError as error:
                 if error.code == 403:
                     conn.execute("DELETE FROM subscribers WHERE chat_id=%s",(chat_id,))
-                db.log(SERVICE,f"Сводка в чат {chat_id} не доставлена, код {error.code}")
+                db.log(SERVICE,f"Сводка подписчику не доставлена, код {error.code}")
                 break
             with conn.transaction():
                 for row in batch:
@@ -229,7 +229,7 @@ def send_weekly_digest(conn, now=None):
         except urllib.error.HTTPError as error:
             if error.code == 403:
                 conn.execute("DELETE FROM subscribers WHERE chat_id=%s",(chat_id,))
-            db.log(SERVICE,f"Еженедельный дайджест в чат {chat_id} не доставлен, код {error.code}")
+            db.log(SERVICE,f"Еженедельный дайджест подписчику не доставлен, код {error.code}")
             continue
         with conn.transaction():
             for row in rows:
@@ -253,7 +253,7 @@ def status_text(conn):
         if run:
             state = {"finished": "завершен", "failed": "упал"}.get(run[1], "идет")
             lines.append(
-                f"{name}: {run[0].astimezone(timezone.utc):%d.%m %H:%M} UTC, {state}. {html.escape(run[2] or '')}"
+                f"{name}: {run[0].astimezone(timezone.utc):%d.%m %H:%M} UTC, {state}. {html.escape(db.redact(run[2] or ''))}"
             )
         else:
             lines.append(f"{name}: еще не было")
@@ -278,7 +278,8 @@ def handle(conn, message):
     words = (message.get("text") or "").split()
     command = words[0].split("@")[0] if words else ""
     if command == "/start":
-        name = chat.get("username") or chat.get("first_name") or ""
+        # Delivery needs chat_id only. Do not collect names or usernames.
+        name = ""
         conn.execute(
             "INSERT INTO subscribers (chat_id, name) VALUES (%s, %s) ON CONFLICT (chat_id) DO NOTHING",
             (chat["id"], name),
@@ -286,7 +287,7 @@ def handle(conn, message):
         text = "Готово, вы подписаны на новости и полезные материалы об онлайн-исследованиях: опросы, респонденты, инструменты, безопасность и персональные данные. Присылаем до трёх ещё не показанных материалов не чаще раза в час. «НОВОЕ» означает впервые присланный материал; дата его публикации показана отдельно. Пустые подборки не отправляем."
         text += "\n\n/latest — последние публикации. /status — состояние обновлений. /stop — отписаться."
         say(chat["id"], text)
-        db.log(SERVICE, f"новый подписчик {name or chat['id']}")
+        db.log(SERVICE, "подписка активирована")
     elif command == "/stop":
         conn.execute("DELETE FROM subscribers WHERE chat_id=%s",(chat["id"],))
         say(chat["id"],"Вы отписались от новостей. /start — подписаться снова.",button=False)
@@ -460,18 +461,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         try:
-            with db.connect() as conn:
-                if path == "/health":
-                    conn.execute("SELECT 1")
-                    body, status, kind = b"ok", 200, "text/plain"
-                elif path == "/":
-                    body, status, kind = (
-                        render_page(conn).encode("utf-8"),
-                        200,
-                        "text/html; charset=utf-8",
-                    )
-                else:
-                    body, status, kind = b"not found", 404, "text/plain"
+            if path == "/" and setting("ENABLE_MINI_APP") != "1":
+                # The HTTP listener is needed by hosting, not a public database UI.
+                body, status, kind = b"bot service is running", 200, "text/plain"
+            elif path not in ("/", "/health"):
+                body, status, kind = b"not found", 404, "text/plain"
+            else:
+                with db.connect() as conn:
+                    if path == "/health":
+                        conn.execute("SELECT 1")
+                        body, status, kind = b"ok", 200, "text/plain"
+                    else:
+                        body, status, kind = render_page(conn).encode("utf-8"), 200, "text/html; charset=utf-8"
         except Exception as error:
             db.log(SERVICE, f"страница не собралась: {error}")
             body, status, kind = b"database unavailable", 503, "text/plain"
