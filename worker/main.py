@@ -3,13 +3,15 @@ import time
 
 import db
 from collector.feeds import relevant_topics
+from collector.survey import classify_material
 
 SERVICE = 'worker'
 POLL_SECONDS = 10
 
 
-def classify(title, description=''):
-    topics = relevant_topics(title,description)
+def classify(title, description='', kind='legal_rss'):
+    verdict = classify_material(title,description) if kind == 'survey_web' else None
+    topics = verdict['topics'] if verdict else ([] if kind == 'survey_web' else relevant_topics(title,description))
     if not topics:
         return None
     # Do not present a title-based match as a verified legal interpretation.
@@ -18,25 +20,26 @@ def classify(title, description=''):
 
 
 def process_new(conn):
-    pending = conn.execute('''SELECT m.id,m.title,m.text FROM materials m JOIN sources s ON s.id=m.source_id
-        WHERE m.status='new' AND s.kind IN ('pravo','legal_rss') AND s.active ORDER BY m.id''').fetchall()
+    pending = conn.execute('''SELECT m.id,m.title,m.text,s.kind FROM materials m JOIN sources s ON s.id=m.source_id
+        WHERE m.status='new' AND s.kind IN ('pravo','legal_rss','survey_web') AND s.active ORDER BY m.id''').fetchall()
     if not pending:
         return
     run_id = db.start_run(conn,SERVICE)
     found = 0
     try:
-        for material_id,title,description in pending:
-            result = classify(title,description or '')
+        for material_id,title,description,kind in pending:
+            result = classify(title,description or '',kind)
             with conn.transaction():
                 if result:
                     topic,summary = result
                     conn.execute('''INSERT INTO findings(material_id,entity,summary,model,prompt_version)
-                        VALUES (%s,%s,%s,'rules-no-model','legal-title-v1')
-                        ON CONFLICT(material_id) DO NOTHING''',(material_id,topic,summary))
+                        VALUES (%s,%s,%s,'rules-no-model',%s)
+                        ON CONFLICT(material_id) DO UPDATE SET entity=EXCLUDED.entity,summary=EXCLUDED.summary,prompt_version=EXCLUDED.prompt_version''',
+                        (material_id,topic,summary,'survey-v1' if kind == 'survey_web' else 'legal-title-v1'))
                     found += 1
                 conn.execute('UPDATE materials SET status=%s WHERE id=%s',
                     ('done' if result else 'skipped',material_id))
-        db.finish_run(conn,SERVICE,run_id,found,f'Отобрано правовых публикаций: {found}')
+        db.finish_run(conn,SERVICE,run_id,found,f'Обработано подходящих материалов: {found}')
     except Exception as error:
         db.fail_run(conn,SERVICE,run_id,error)
         raise

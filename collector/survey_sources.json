@@ -1,0 +1,11 @@
+[
+  {"name":"Тибурон: методичка","url":"https://tiburon-research.ru/metodichka","pattern":"^/metodichka/[^/?#]+/?$","seeds":["https://tiburon-research.ru/metodichka/kak-sostavit-anketu-dlya-issledovaniya"]},
+  {"name":"Testograf: блог","url":"https://www.testograf.ru/ru/blog","pattern":"^/ru/blog/[^/?#]+/?$","seeds":["https://www.testograf.ru/ru/blog/kak-razrabotat-anketu-dlya-oprosa-osnovnye-shagi-i-vozmozhnosti"]},
+  {"name":"Анкетолог: блог","url":"https://blog.anketolog.ru/","pattern":"^/\\d{4}/\\d{2}/[^/?#]+/?$","seeds":["https://blog.anketolog.ru/2014/08/kak-sostavit-anketu/"]},
+  {"name":"Pressfeed: исследования и практика","url":"https://news.pressfeed.ru/","pattern":"^/[^/?#]+/?$","seeds":["https://news.pressfeed.ru/na-zamenu-gugl-formam-11-servisov-dlya-oprosov-razreshennyh-v-rossii/"]},
+  {"name":"Biz360: материалы","url":"https://biz360.ru/materials/","pattern":"^/materials/[^/?#]+/?$","seeds":["https://biz360.ru/materials/onlayn-oprosy-zachem-oni-nuzhny-i-kak-ikh-provodit/"]},
+  {"name":"Kaspersky: безопасность","url":"https://www.kaspersky.ru/resource-center","pattern":"^/resource-center/[^/?#]+/[^/?#]+/?$","seeds":["https://www.kaspersky.ru/resource-center/preemptive-safety/are-online-survey-sites-safe"]},
+  {"name":"СберБизнес Live: практика","url":"https://sberbusiness.live/","pattern":"^/publications/[^/?#]+/?$","seeds":["https://sberbusiness.live/publications/onlajn-opros-servisy"]},
+  {"name":"КонсультантПлюс: основа по данным","url":"https://www.consultant.ru/document/cons_doc_LAW_61801/","pattern":"^/document/cons_doc_LAW_61801/$","seed_only":true,"seeds":["https://www.consultant.ru/document/cons_doc_LAW_61801/"]},
+  {"name":"Госдума: разъяснение о данных","url":"https://duma.gov.ru/news/55007/","pattern":"^/news/55007/$","seed_only":true,"seeds":["https://duma.gov.ru/news/55007/"]}
+]

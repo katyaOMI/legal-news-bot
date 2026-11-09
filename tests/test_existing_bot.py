@@ -39,7 +39,7 @@ class BatchDB(DeliveryDB):
         self.rows=rows
     def execute(self, sql, params=()):
         if sql == 'SELECT chat_id FROM subscribers': return Cursor([(11,)])
-        if 'SELECT f.id,f.summary' in sql: return Cursor([row for row in self.rows if (row[0],11) not in self.delivered])
+        if 'SELECT f.id,f.summary' in sql: return Cursor([row for row in self.rows if (row[0],11) not in self.delivered][:3])
         return super().execute(sql,params)
 
 
@@ -113,8 +113,8 @@ class ExistingBotTests(unittest.TestCase):
         messages=[]
         with patch.object(bot,'say',lambda chat,text,button=True:messages.append(text)),patch.object(bot.db,'log'):
             bot.send_new(conn)
-        self.assertEqual([message.count('• <a href=') for message in messages],[3,1])
-        self.assertTrue(all('Обновление в правовых новостях' in message for message in messages))
+        self.assertEqual([message.count('• <a href=') for message in messages],[3])
+        self.assertTrue(all('НОВОЕ' in message for message in messages))
 
     def test_weekly_digest_is_due_monday_at_1300_moscow(self):
         monday_1300_moscow=datetime(2026,11,9,10,0,tzinfo=timezone.utc)
@@ -133,7 +133,8 @@ class ExistingBotTests(unittest.TestCase):
             bot.send_weekly_digest(conn,when)
             bot.send_weekly_digest(conn,when)
         self.assertEqual(len(messages),1)
-        self.assertIn('Дайджест новостей',messages[0])
+        self.assertIn('Из архива правовых публикаций',messages[0])
+        self.assertNotIn('Дайджест новостей',messages[0])
         self.assertEqual(messages[0].count('• <a href='),3)
         self.assertEqual(len(conn.delivered),3)
 
@@ -142,6 +143,30 @@ class ExistingBotTests(unittest.TestCase):
         with patch.object(bot,'say') as send:
             bot.send_weekly_digest(conn,datetime(2026,11,9,10,0,tzinfo=timezone.utc))
         send.assert_not_called()
+
+    def test_weekly_digest_does_not_send_empty_message_or_consume_week(self):
+        conn=WeeklyDB([])
+        when=datetime(2026,11,9,10,0,tzinfo=timezone.utc)
+        with patch.object(bot,'say') as send:
+            bot.send_weekly_digest(conn,when)
+            bot.send_weekly_digest(conn,when)
+        send.assert_not_called()
+        self.assertEqual(conn.delivered,set())
+        self.assertEqual(conn.runs,set())
+
+    def test_weekly_digest_can_send_when_material_arrives_after_empty_check(self):
+        conn=WeeklyDB([])
+        messages=[]
+        when=datetime(2026,11,9,10,0,tzinfo=timezone.utc)
+        with patch.object(bot,'say',lambda chat,text,button=True:messages.append(text)):
+            bot.send_weekly_digest(conn,when)
+            conn.rows=[(1,'О персональных данных','Персональные данные','https://example.com/1','Источник')]
+            bot.send_weekly_digest(conn,when)
+            bot.send_weekly_digest(conn,when)
+        self.assertEqual(len(messages),1)
+        self.assertIn('Из архива правовых публикаций',messages[0])
+        self.assertEqual(conn.delivered,{(1,11)})
+        self.assertEqual(len(conn.runs),1)
 
 
 if __name__=='__main__': unittest.main()

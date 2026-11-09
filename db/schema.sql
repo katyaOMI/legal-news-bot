@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS finding_deliveries (
 );
 CREATE OR REPLACE VIEW legal_findings AS
  SELECT f.* FROM findings f JOIN materials m ON m.id=f.material_id
- JOIN sources s ON s.id=m.source_id WHERE s.kind IN ('pravo','legal_rss') AND s.active;
+ JOIN sources s ON s.id=m.source_id WHERE s.kind IN ('pravo','legal_rss','survey_web') AND s.active;
 
 -- Official API is kept as a configured optional source, not polled while unavailable.
 -- This one-time switch is keyed so operators can enable it later without being reset.
@@ -126,4 +126,24 @@ CREATE TABLE IF NOT EXISTS weekly_digest_runs (
  sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  item_count INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(chat_id,week_start)
+);
+
+-- Additive survey-material migration. Existing subscriptions/deliveries stay intact.
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS content_kind TEXT NOT NULL DEFAULT 'news';
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS usefulness TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS source_pages (
+ source_id INTEGER NOT NULL REFERENCES sources(id),
+ url TEXT NOT NULL,
+ last_checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ last_error TEXT,
+ PRIMARY KEY(source_id,url)
+);
+CREATE TABLE IF NOT EXISTS source_checks (
+ run_id INTEGER NOT NULL REFERENCES runs(id),
+ source_id INTEGER NOT NULL REFERENCES sources(id),
+ discovered INTEGER NOT NULL DEFAULT 0,
+ checked INTEGER NOT NULL DEFAULT 0,
+ accepted INTEGER NOT NULL DEFAULT 0,
+ errors INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(run_id,source_id)
 );
