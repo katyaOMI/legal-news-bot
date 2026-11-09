@@ -128,7 +128,7 @@ def main():
                     with conn.transaction():
                         if not previous_error and kind != 'survey_web':
                             health_event(conn,source_id,'outage',f'{name}. Дорогие читатели! Часть источников временно недоступна. Новости из остальных источников продолжают поступать. Сообщим, когда обновление восстановится.')
-                        conn.execute('UPDATE sources SET last_error=%s WHERE id=%s', (str(error)[:1500],source_id))
+                        conn.execute('UPDATE sources SET last_error=%s WHERE id=%s', (db.redact(error)[:1500],source_id))
                     db.log(SERVICE,f'{name}: проверка не выполнена: {error}')
             if failures:
                 raise RuntimeError('Не удалось проверить источники: ' + ', '.join(failures))

@@ -3,6 +3,7 @@
 import os
 import sys
 from pathlib import Path
+from db.privacy import redact
 
 
 SCHEMA = Path(__file__).with_name("schema.sql")
@@ -26,7 +27,7 @@ def init_schema(conn):
 
 
 def log(service, message):
-    print(f"[{service}] {message}", file=sys.stdout, flush=True)
+    print(f"[{service}] {redact(message)}", file=sys.stdout, flush=True)
 
 
 def start_run(conn, service):
@@ -57,6 +58,6 @@ def finish_run(conn, service, run_id, items, note):
 def fail_run(conn, service, run_id, error):
     conn.execute(
         "UPDATE runs SET status = 'failed', note = %s, finished_at = now() WHERE id = %s",
-        (str(error)[:500], run_id),
+        (redact(error)[:500], run_id),
     )
     log(service, f"прогон {run_id} упал: {error}")
