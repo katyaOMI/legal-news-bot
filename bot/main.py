@@ -29,7 +29,7 @@ MOSCOW = ZoneInfo("Europe/Moscow")
 COMMANDS = [
     {"command": "start", "description": "подписаться на находки"},
     {"command": "status", "description": "состояние обновления новостей"},
-    {"command": "latest", "description": "последние правовые публикации"},
+    {"command": "latest", "description": "последние новости и материалы"},
     {"command": "stop", "description": "отписаться от новостей"},
 ]
 
@@ -85,12 +85,24 @@ def say(chat_id, text, button=True):
     api("sendMessage", payload)
 
 
-def finding_lines(rows):
+def finding_lines(rows, new=False):
     lines = []
-    for summary, entity, url, source in rows:
+    kinds={'news':'Новость','article':'Статья','guide':'Практика','review':'Инструменты','document':'Документ'}
+    for row in rows:
+        summary, entity, url, source = row[:4]
+        published, kind, benefit = row[4:7] if len(row) >= 7 else (None,'news','')
         line = f'• <a href="{html.escape(url)}">{html.escape(summary)}</a>\n  {html.escape(source)}'
         if entity:
             line += f" · {html.escape(entity)}"
+        if benefit:
+            line += '\n' + html.escape(benefit)
+        if isinstance(published,datetime):
+            day=published.astimezone(MOSCOW).strftime('%d.%m.%Y')
+        else:
+            day=str(published)[:10] if published else 'не указана'
+        line += '\nДата публикации: ' + html.escape(day)
+        label=('НОВОЕ · ' if new else '') + kinds.get(kind,'Материал')
+        line='<b>'+label+'</b>\n'+line
         lines.append(line)
     return lines
 
@@ -138,23 +150,28 @@ def send_source_events(conn):
 
 def send_new(conn):
     busy = conn.execute("""SELECT EXISTS (SELECT 1 FROM materials m JOIN sources s ON s.id=m.source_id
-        WHERE m.status='new' AND s.kind IN ('pravo','legal_rss') AND s.active)
+        WHERE m.status='new' AND s.kind IN ('pravo','legal_rss','survey_web') AND s.active)
         OR EXISTS (SELECT 1 FROM runs WHERE service='collector' AND status IN ('started','running')
             AND started_at > now()-interval '30 minutes')""").fetchone()[0]
     if busy:
         return
     for (chat_id,) in conn.execute("SELECT chat_id FROM subscribers").fetchall():
-        rows = conn.execute("""SELECT f.id,f.summary,f.entity,m.url,s.name
+        sent_recently=conn.execute("""SELECT EXISTS (SELECT 1 FROM finding_deliveries
+            WHERE chat_id=%s AND sent_at > now()-interval '1 hour')""",(chat_id,)).fetchone()[0]
+        if sent_recently:
+            continue
+        rows = conn.execute("""SELECT f.id,f.summary,f.entity,m.url,s.name,m.published_at,m.content_kind,m.usefulness
             FROM legal_findings f JOIN materials m ON m.id=f.material_id
             JOIN sources s ON s.id=m.source_id
             JOIN subscribers sub ON sub.chat_id=%s
-            WHERE NOT m.is_backfill AND f.created_at >= sub.started_at AND NOT EXISTS (
+            WHERE f.created_at >= sub.started_at AND NOT EXISTS (
                 SELECT 1 FROM finding_deliveries d WHERE d.finding_id=f.id AND d.chat_id=sub.chat_id)
-            ORDER BY f.id LIMIT 60""",(chat_id,)).fetchall()
+            ORDER BY row_number() OVER (PARTITION BY s.id ORDER BY m.published_at DESC NULLS LAST,f.id),
+                     m.published_at DESC NULLS LAST,f.id LIMIT 3""",(chat_id,)).fetchall()
         for batch in batches(rows):
-            text = "<b>Обновление в правовых новостях</b>\n\n"
-            text += "\n\n".join(finding_lines([row[1:] for row in batch]))
-            text += "\n\nОтбор по заголовку и анонсу источника. Дата вступления в силу не проверена."
+            text = "<b>Новости и материалы для онлайн-исследований</b>\n\n"
+            text += "\n\n".join(finding_lines([row[1:] for row in batch],new=True))
+            text += "\n\n«НОВОЕ» — впервые прислано ботом. Дата публикации указана отдельно."
             try:
                 say(chat_id,text,button=False)
             except urllib.error.HTTPError as error:
@@ -175,7 +192,7 @@ def send_weekly_digest(conn, now=None):
         return
     busy = conn.execute("""SELECT EXISTS (
         SELECT 1 FROM materials m JOIN sources s ON s.id=m.source_id
-        WHERE m.status='new' AND s.kind IN ('pravo','legal_rss') AND s.active)
+        WHERE m.status='new' AND s.kind IN ('pravo','legal_rss','survey_web') AND s.active)
         OR EXISTS (SELECT 1 FROM runs WHERE service='collector' AND status IN ('started','running')
             AND started_at > now()-interval '30 minutes')""").fetchone()[0]
     if busy:
@@ -191,7 +208,10 @@ def send_weekly_digest(conn, now=None):
                                     (chat_id,week_start)).fetchone()
         if already_sent:
             continue
-        rows = conn.execute("""SELECT f.id,f.summary,f.entity,m.url,s.name
+        if conn.execute("""SELECT EXISTS (SELECT 1 FROM finding_deliveries
+            WHERE chat_id=%s AND sent_at > now()-interval '1 hour')""",(chat_id,)).fetchone()[0]:
+            continue
+        rows = conn.execute("""SELECT f.id,f.summary,f.entity,m.url,s.name,m.published_at,m.content_kind,m.usefulness
             FROM legal_findings f JOIN materials m ON m.id=f.material_id
             JOIN sources s ON s.id=m.source_id
             WHERE m.is_backfill AND m.published_at >= %s
@@ -199,10 +219,11 @@ def send_weekly_digest(conn, now=None):
                               WHERE d.finding_id=f.id AND d.chat_id=%s)
             ORDER BY m.published_at DESC NULLS LAST,f.id DESC LIMIT %s""",
             (year_start,chat_id,LATEST)).fetchall()
-        if rows:
-            text = "<b>Дайджест новостей</b>\n\n" + "\n\n".join(finding_lines([row[1:] for row in rows]))
-        else:
-            text = "<b>Дайджест новостей</b>\n\nЗа последнюю неделю новых подходящих публикаций не было. В архиве этого года пока нет материалов для подборки."
+        if not rows:
+            # No publication means no digest. Do not mark the week as delivered:
+            # a later successful collection may still provide useful material.
+            continue
+        text = "<b>Из архива правовых публикаций</b>\n\n" + "\n\n".join(finding_lines([row[1:] for row in rows],new=True))
         try:
             say(chat_id,text,button=False)
         except urllib.error.HTTPError as error:
@@ -240,6 +261,13 @@ def status_text(conn):
         "SELECT (SELECT count(*) FROM legal_findings), (SELECT count(*) FROM subscribers)"
     ).fetchone()
     lines.append(f"\nВсего находок {findings}, подписчиков {subscribers}.")
+    active,errors=conn.execute("SELECT count(*),count(*) FILTER (WHERE last_error IS NOT NULL) FROM sources WHERE active").fetchone()
+    lines.append(f'Источников активно: {active}, с ошибками последней проверки: {errors}.')
+    checks=conn.execute("""SELECT s.name,c.discovered,c.checked,c.accepted,c.errors FROM source_checks c
+        JOIN sources s ON s.id=c.source_id
+        WHERE c.run_id=(SELECT max(run_id) FROM source_checks) ORDER BY s.name""").fetchall()
+    for name,discovered,checked,accepted,failed in checks:
+        lines.append(f'{html.escape(name)}: найдено ссылок {discovered}, прочитано {checked}, подошло {accepted}, ошибок {failed}.')
     return "\n".join(lines)
 
 
@@ -255,7 +283,7 @@ def handle(conn, message):
             "INSERT INTO subscribers (chat_id, name) VALUES (%s, %s) ON CONFLICT (chat_id) DO NOTHING",
             (chat["id"], name),
         )
-        text = "Готово, вы подписаны на правовые новости РФ для онлайн-исследований. Проверяем источники каждые несколько часов и присылаем новые подходящие публикации по мере обнаружения. Если за неделю новых публикаций нет, по понедельникам в 13:00 МСК отправляем дайджест архива текущего года. В одном сообщении — не больше трёх новостей."
+        text = "Готово, вы подписаны на новости и полезные материалы об онлайн-исследованиях: опросы, респонденты, инструменты, безопасность и персональные данные. Присылаем до трёх ещё не показанных материалов не чаще раза в час. «НОВОЕ» означает впервые присланный материал; дата его публикации показана отдельно. Пустые подборки не отправляем."
         text += "\n\n/latest — последние публикации. /status — состояние обновлений. /stop — отписаться."
         say(chat["id"], text)
         db.log(SERVICE, f"новый подписчик {name or chat['id']}")
@@ -263,12 +291,10 @@ def handle(conn, message):
         conn.execute("DELETE FROM subscribers WHERE chat_id=%s",(chat["id"],))
         say(chat["id"],"Вы отписались от новостей. /start — подписаться снова.",button=False)
     elif command == "/latest":
-        year_start = datetime(datetime.now(MOSCOW).year,1,1,tzinfo=MOSCOW)
-        rows = conn.execute("""SELECT f.summary,f.entity,m.url,s.name FROM legal_findings f
+        rows = conn.execute("""SELECT f.summary,f.entity,m.url,s.name,m.published_at,m.content_kind,m.usefulness FROM legal_findings f
             JOIN materials m ON m.id=f.material_id JOIN sources s ON s.id=m.source_id
-            WHERE m.published_at >= %s
-            ORDER BY coalesce(m.published_at,f.created_at) DESC,f.id DESC LIMIT 3""",(year_start,)).fetchall()
-        text = "<b>Дайджест новостей</b>\n\n" + "\n\n".join(finding_lines(rows)) if rows else "В ленте пока нет публикаций за текущий год. /status — состояние сбора."
+            ORDER BY f.created_at DESC,f.id DESC LIMIT 3""").fetchall()
+        text = "<b>Последние найденные материалы</b>\n\n" + "\n\n".join(finding_lines(rows)) if rows else "Подходящих материалов пока нет. /status — состояние сбора и источников."
         say(chat["id"],text,button=False)
     elif command == "/status":
         say(chat["id"], status_text(conn))
