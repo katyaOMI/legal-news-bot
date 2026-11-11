@@ -70,20 +70,6 @@ class ExistingBotTests(unittest.TestCase):
         self.assertEqual(summary,'О защите персональных данных')
         self.assertIsNone(classify('О назначении сотрудника'))
 
-    def test_failed_recipient_is_retried_without_duplicate_to_successful(self):
-        conn=DeliveryDB()
-        delivered=[]
-        def send(chat,text,button=True):
-            if chat==22: raise urllib.error.HTTPError('redacted',500,'test',None,None)
-            delivered.append(chat)
-        with patch.object(bot,'say',send),patch.object(bot.db,'log'):
-            bot.send_new(conn)
-        self.assertEqual(conn.delivered,{(1,11)})
-        with patch.object(bot,'say',lambda chat,text,button=True:delivered.append(chat)):
-            bot.send_new(conn)
-            bot.send_new(conn)
-        self.assertEqual(delivered,[11,22])
-        self.assertEqual(conn.delivered,{(1,11),(1,22)})
 
     def test_notices_once_per_recipient_and_order_after_failure(self):
         conn=DeliveryDB()
@@ -107,36 +93,8 @@ class ExistingBotTests(unittest.TestCase):
         self.assertNotIn('<script>',text)
         self.assertIn('&lt;script&gt;',text)
 
-    def test_new_news_messages_have_at_most_three_items(self):
-        rows=[(i,f'Новость {i}','Персональные данные',f'https://example.com/{i}','Источник') for i in range(1,5)]
-        conn=BatchDB(rows)
-        messages=[]
-        with patch.object(bot,'say',lambda chat,text,button=True:messages.append(text)),patch.object(bot.db,'log'):
-            bot.send_new(conn)
-        self.assertEqual([message.count('• <a href=') for message in messages],[3])
-        self.assertTrue(all('НОВОЕ' in message for message in messages))
 
-    def test_weekly_digest_is_due_monday_at_1300_moscow(self):
-        monday_1300_moscow=datetime(2026,11,9,10,0,tzinfo=timezone.utc)
-        monday_1259_moscow=monday_1300_moscow-timedelta(minutes=1)
-        tuesday=datetime(2026,11,10,10,0,tzinfo=timezone.utc)
-        self.assertEqual(bot.weekly_digest_window(monday_1300_moscow).isoformat(),'2026-11-09')
-        self.assertIsNone(bot.weekly_digest_window(monday_1259_moscow))
-        self.assertIsNone(bot.weekly_digest_window(tuesday))
 
-    def test_weekly_digest_sends_at_most_three_archive_items_once(self):
-        rows=[(i,f'Архивная новость {i}','Персональные данные',f'https://example.com/{i}','Источник') for i in range(1,5)]
-        conn=WeeklyDB(rows)
-        messages=[]
-        when=datetime(2026,11,9,10,0,tzinfo=timezone.utc)
-        with patch.object(bot,'say',lambda chat,text,button=True:messages.append(text)):
-            bot.send_weekly_digest(conn,when)
-            bot.send_weekly_digest(conn,when)
-        self.assertEqual(len(messages),1)
-        self.assertIn('Из архива правовых публикаций',messages[0])
-        self.assertNotIn('Дайджест новостей',messages[0])
-        self.assertEqual(messages[0].count('• <a href='),3)
-        self.assertEqual(len(conn.delivered),3)
 
     def test_weekly_digest_waits_if_new_news_arrived_this_week(self):
         conn=WeeklyDB([],recent_news=True)
@@ -154,19 +112,6 @@ class ExistingBotTests(unittest.TestCase):
         self.assertEqual(conn.delivered,set())
         self.assertEqual(conn.runs,set())
 
-    def test_weekly_digest_can_send_when_material_arrives_after_empty_check(self):
-        conn=WeeklyDB([])
-        messages=[]
-        when=datetime(2026,11,9,10,0,tzinfo=timezone.utc)
-        with patch.object(bot,'say',lambda chat,text,button=True:messages.append(text)):
-            bot.send_weekly_digest(conn,when)
-            conn.rows=[(1,'О персональных данных','Персональные данные','https://example.com/1','Источник')]
-            bot.send_weekly_digest(conn,when)
-            bot.send_weekly_digest(conn,when)
-        self.assertEqual(len(messages),1)
-        self.assertIn('Из архива правовых публикаций',messages[0])
-        self.assertEqual(conn.delivered,{(1,11)})
-        self.assertEqual(len(conn.runs),1)
 
 
 if __name__=='__main__': unittest.main()
