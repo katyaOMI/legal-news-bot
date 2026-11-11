@@ -1,4 +1,4 @@
-"""Evaluate saved public-text model responses locally, without API or database calls."""
+"""Check saved responses locally. CLI exit: 0 valid, 1 invalid response, 2 input/I/O error."""
 import argparse
 from collections import Counter
 import json
@@ -89,7 +89,9 @@ def _row_errors(row, example):
             errors.append('accept_requires_evidence')
         if any(not _has_quote(quote, example) for quote in evidence):
             errors.append('nonverbatim_evidence')
-    if 'russia_basis' in row:
+    if 'russia_basis' not in row:
+        errors.append('missing_russia_basis')
+    else:
         basis = row['russia_basis']
         if basis is not None and not _has_quote(basis, example):
             errors.append('nonverbatim_russia_basis')
@@ -161,13 +163,16 @@ def evaluate_response(raw, examples, gold, *, selected_ids=None,
     return dict(
         ids=list(index), json_valid=json_valid, packet_errors=packet_errors,
         total=len(index), valid=valid_count, invalid=len(index) - valid_count,
+        comparison_eligible=valid_count == len(index),
+        metrics_status='complete' if valid_count == len(index) else 'incomplete_not_for_comparison',
         correct=sum(row['correct'] for row in results),
         # Include duplicate rows, so a later unsafe decision cannot be hidden.
         unsafe_accepts=len(visible_unsafe),
+        unsafe_accepts_basis='observed_known_ids_including_invalid_rows',
         missed_accepts=sum(row['expected'] == 'accept'
                           and not (row['valid'] and row['decision'] == 'accept')
                           for row in results),
-        unnecessary_review=sum(row['decision'] == 'review' and row['expected'] == 'reject'
+        unnecessary_review=sum(row['valid'] and row['decision'] == 'review' and row['expected'] == 'reject'
                                for row in results),
         confusion=confusion, items=results, duration_seconds=duration_seconds,
         duration_status='not_measured' if duration_seconds is None else 'measured',

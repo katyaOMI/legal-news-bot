@@ -33,6 +33,8 @@ class ModelEvaluationTests(unittest.TestCase):
         self.assertIsNone(result['duration_seconds'])
         self.assertEqual(result['confusion']['review']['review'], 1)
         self.assertEqual(result['semantic_review'], 'required_separately')
+        self.assertTrue(result['comparison_eligible'])
+        self.assertEqual(result['metrics_status'], 'complete')
 
     def test_fences_ndjson_and_duplicate_json_keys_are_not_repaired(self):
         raw_array = json.dumps(self.rows)
@@ -68,7 +70,9 @@ class ModelEvaluationTests(unittest.TestCase):
                 self.assertEqual(result['correct'], 2)
         rows = [dict(self.rows[0]), *self.rows[1:]]
         del rows[0]['russia_basis']
-        self.assertEqual(self.evaluate(rows)['invalid'], 1)
+        result = self.evaluate(rows)
+        self.assertEqual(result['invalid'], 1)
+        self.assertIn('missing_russia_basis', result['items'][0]['errors'])
 
     def test_quotes_are_exact_substrings_and_only_crlf_is_normalized(self):
         self.rows[0]['evidence'] = ['без входа.\r\nКонтакты']
@@ -101,6 +105,26 @@ class ModelEvaluationTests(unittest.TestCase):
         self.assertEqual(result['invalid'], 3)
         self.assertEqual(result['correct'], 0)
         self.assertEqual(result['unsafe_accepts'], 1)
+
+    def test_invalid_packet_metrics_are_not_eligible_for_comparison(self):
+        duplicate = dict(self.rows[1], decision='accept', evidence=['Подбор числа участников.'])
+        for rows in [self.rows + [duplicate], self.rows + [dict(self.rows[0], id='unknown')]]:
+            with self.subTest(rows=rows):
+                result = self.evaluate(rows)
+                self.assertFalse(result['comparison_eligible'])
+                self.assertEqual(result['metrics_status'], 'incomplete_not_for_comparison')
+                self.assertEqual(result['unsafe_accepts_basis'],
+                                 'observed_known_ids_including_invalid_rows')
+                self.assertEqual(result['missed_accepts'], 1)
+        self.assertEqual(self.evaluate(self.rows + [duplicate])['unsafe_accepts'], 1)
+
+    def test_invalid_review_is_not_counted_as_valid_excess_review(self):
+        self.rows[1].update(decision='review', evidence=['выдуманная цитата'])
+        result = self.evaluate()
+        self.assertEqual(result['invalid'], 1)
+        self.assertEqual(result['unnecessary_review'], 0)
+        self.assertEqual(result['confusion']['reject']['invalid'], 1)
+        self.assertFalse(result['comparison_eligible'])
 
     def test_subset_excludes_unpaired_examples(self):
         result = self.evaluate(self.rows[:1], selected_ids=['a'])
