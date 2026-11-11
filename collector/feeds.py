@@ -10,6 +10,7 @@ from email.utils import parsedate_to_datetime
 from legal_news.core import clean, topics_for
 
 SOURCES = [
+    ('Касперский: блог безопасности', 'https://www.kaspersky.ru/blog/feed/'),
     ('КонсультантПлюс: горячие документы', 'https://www.consultant.ru/rss/hotdocs.xml'),
     ('КонсультантПлюс: федеральное законодательство', 'https://www.consultant.ru/rss/fd.xml'),
     ('КонсультантПлюс: новости для юриста', 'https://www.consultant.ru/rss/nw.xml'),
@@ -40,11 +41,9 @@ def dedup_key(title):
 
 
 def relevant_topics(title, description=''):
-    # The requested first stage excludes court decisions and case-law news.
-    text = clean(title)
-    if re.search(r'(?i)^(?:вс\s+рф|кс\s+рф|суд\b|суды\b|судебн|определение\s+(?:верховн|конституцион))', text):
-        return []
-    return topics_for(text+' '+clean(description))
+    from legal_news.relevance import verdict
+    result = verdict(title, description)
+    return result['topics'] if result else []
 
 
 def fetch_bytes(url):
@@ -79,8 +78,6 @@ def parse_rss(body, since=None):
         if since and published < since:
             continue
         categories=[clean(node.text) for node in element.findall('category')]
-        if any('судебная практика' in value.lower() for value in categories):
-            continue
         result.append(dict(url=link,title=title,text=description,published_at=published.isoformat(),
             dedup_key=dedup_key(title),metadata=dict(title=title,description=raw_description,
             link=link,pubDate=raw_date,categories=categories)))

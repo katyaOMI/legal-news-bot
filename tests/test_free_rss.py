@@ -35,10 +35,10 @@ class FreeRSSCheck(unittest.TestCase):
         self.assertEqual(len(parse_rss(xml(),datetime(2026,11,2,8,tzinfo=timezone.utc))),1)
         self.assertEqual(parse_rss(xml(),datetime(2026,11,2,10,tzinfo=timezone.utc)),[])
 
-    def test_court_practice_excluded(self):
-        self.assertEqual(parse_rss(xml(category='Судебная практика')),[])
-        self.assertEqual(relevant_topics('ВС РФ: персональные данные'),[])
-        self.assertEqual(relevant_topics('Суд обязал удалить персональные данные'),[])
+    def test_relevant_enforcement_is_not_blanket_excluded(self):
+        self.assertEqual(len(parse_rss(xml(category='Судебная практика'))),1)
+        self.assertTrue(relevant_topics('ВС РФ: персональные данные'))
+        self.assertTrue(relevant_topics('Суд обязал удалить персональные данные'))
 
     def test_unsafe_link_rejected(self):
         for link in ['javascript:alert(1)','file:///private','https://user:password@example.com/']:

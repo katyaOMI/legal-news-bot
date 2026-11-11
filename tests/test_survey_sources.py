@@ -10,10 +10,10 @@ def page(title, body='', description='', date=''):
 class SurveySourcesTests(unittest.TestCase):
     def test_owner_examples_are_relevant(self):
         for title in ['Безопасно ли пользоваться сайтами интернет-опросов?',
-                      '12 сервисов для анкетирования',
+                      'Приватность сервисов онлайн-опросов',
                       'Федеральный закон О персональных данных',
-                      'Онлайн-опросы: зачем они нужны и как их проводить',
-                      'Как составить анкету для исследования']:
+                      'Фишинговые онлайн-опросы',
+                      'Как защитить данные респондента в опросе']:
             with self.subTest(title=title):
                 self.assertIsNotNone(classify_material(title))
 
@@ -35,13 +35,13 @@ class SurveySourcesTests(unittest.TestCase):
         self.assertIn('Безопасность опросов',result['topics'])
 
     def test_page_extracts_old_date_without_replacing_it(self):
-        result=article('https://example.com/guide',page('Как провести онлайн-опрос','Понятные вопросы для респондента',date='2016-12-14'))
-        self.assertEqual(result['published_at'],'2016-12-14T00:00:00+00:00')
+        result=article('https://example.com/guide',page('Как защитить персональные данные в опросе','Защита персональных данных респондента',date='2016-12-14'))
+        self.assertEqual(result['published_at'],'2016-12-14T00:00:00+03:00')
         self.assertNotIn('Опросы и персональные данные',result['text'])
-        self.assertEqual(result['content_kind'],'guide')
+        self.assertEqual(result['content_kind'],'article')
 
     def test_unknown_date_and_html_entities(self):
-        result=article('https://example.com/guide',page('Анкеты &amp; опросы','Как задавать вопросы'))
+        result=article('https://example.com/guide',page('Конфиденциальность анкет &amp; опросов','Защита ответов'))
         self.assertIsNone(result['published_at'])
         self.assertIn('&',result['title'])
 
@@ -60,7 +60,7 @@ class SurveySourcesTests(unittest.TestCase):
                 return '<a href="/blog/new">Как провести опрос</a><a href="/blog/broken">Анкета</a>'
             if url.endswith('broken'):
                 raise TimeoutError('offline test')
-            return page('Как провести опрос',date='2026-11-01')
+            return page('Безопасность опросов',date='2026-11-01')
         result=read_source(source,known={'https://example.com/blog/old'},fetch=fetch)
         self.assertEqual([row['url'] for row in result['items']],['https://example.com/blog/new'])
         self.assertEqual(len(result['errors']),1)

@@ -19,9 +19,10 @@ def clean(value):
     return " ".join(html.unescape(re.sub(r"<[^>]*>", " ", str(value or ""))).split())
 
 def topics_for(title):
-    rules = json.loads((Path(__file__).with_name("topics.json")).read_text(encoding="utf-8-sig"))
-    text = title.lower().replace("ё", "е")
-    return [topic for topic, patterns in rules.items() if any(re.search(p, text) for p in patterns)]
+    from legal_news.relevance import verdict
+    result=verdict(title)
+    return result['topics'] if result else []
+
 
 def request_json(url):
     request = urllib.request.Request(url, headers={

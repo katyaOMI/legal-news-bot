@@ -1,10 +1,4 @@
-"""Bot: Telegram bot and a Mini App with the findings.
-
-- remembers everyone who pressed Start (table subscribers);
-- after each collection is sorted by the worker, sends one summary to subscribers and marks findings.sent_at;
-- answers /start and /status;
-- serves the Mini App page on PORT, the bot opens it inside Telegram.
-"""
+"""Privacy-risk bot: daily Moscow digest, manual commands and optional web UI."""
 
 import html
 import json
@@ -85,38 +79,42 @@ def say(chat_id, text, button=True):
     api("sendMessage", payload)
 
 
-def finding_lines(rows, new=False):
-    lines = []
-    kinds={'news':'Новость','article':'Статья','guide':'Практика','review':'Инструменты','document':'Документ'}
+def finding_lines(rows, new=False, now=None):
+    # `new` is retained for callers but cannot override publication freshness.
+    now = now or datetime.now(timezone.utc)
+    kinds={'news':'Новость','article':'Разъяснение','guide':'Материал','review':'Обзор рисков','document':'Документ'}
+    lines=[]
     for row in rows:
         summary, entity, url, source = row[:4]
-        published, kind, benefit = row[4:7] if len(row) >= 7 else (None,'news','')
-        line = f'• <a href="{html.escape(url)}">{html.escape(summary)}</a>\n  {html.escape(source)}'
+        published, kind, benefit = row[4:7] if len(row)>=7 else (None,'article','')
+        risk, audience = row[7:9] if len(row)>=9 else ('','')
+        if isinstance(published,str):
+            try:
+                published=datetime.fromisoformat(published.replace('Z','+00:00'))
+            except ValueError:
+                published=None
+        if published is not None and not isinstance(published,datetime):
+            published=datetime.combine(published,datetime_time.min,MOSCOW)
+        if published is not None and published.tzinfo is None:
+            published=published.replace(tzinfo=MOSCOW)
+        fresh=kind=='news' and published is not None and 0 <= (now-published).total_seconds() <= 72*3600
+        label=('НОВОЕ · ' if fresh else '')+kinds.get(kind,'Материал')
+        line='<b>'+label+'</b>\n• <a href="'+html.escape(url,quote=True)+'">'+html.escape(summary[:900])+'</a>\n'+html.escape(source)
         if entity:
-            line += f" · {html.escape(entity)}"
+            line+=' · '+html.escape(entity[:160])
+        if risk:
+            line+='\nЧто произошло / риск: '+html.escape(risk[:650])
+        if audience:
+            line+='\nКого касается: '+html.escape(audience[:250])
         if benefit:
-            line += '\n' + html.escape(benefit)
-        if isinstance(published,datetime):
-            day=published.astimezone(MOSCOW).strftime('%d.%m.%Y')
-        else:
-            day=str(published)[:10] if published else 'не указана'
-        line += '\nДата публикации: ' + html.escape(day)
-        label=('НОВОЕ · ' if new else '') + kinds.get(kind,'Материал')
-        line='<b>'+label+'</b>\n'+line
+            line+='\nЧто проверить: '+html.escape(benefit[:450])
+        line+='\nДата публикации: '+(published.astimezone(MOSCOW).strftime('%d.%m.%Y') if published else 'не указана')
         lines.append(line)
     return lines
 
 
 def batches(rows, size=LATEST):
-    return [rows[index:index + size] for index in range(0, len(rows), size)]
-
-
-def weekly_digest_window(now=None):
-    """Return this week's Monday date when the Moscow weekly digest is due."""
-    local = (now or datetime.now(timezone.utc)).astimezone(MOSCOW)
-    if local.weekday() != 0 or (local.hour, local.minute) < (13, 0):
-        return None
-    return local.date()
+    return [rows[index:index+size] for index in range(0,len(rows),size)]
 
 
 def setup(conn):
@@ -148,95 +146,14 @@ def send_source_events(conn):
             db.log(SERVICE,f"Уведомление подписчику не доставлено, код {error.code}")
 
 
-def send_new(conn):
-    busy = conn.execute("""SELECT EXISTS (SELECT 1 FROM materials m JOIN sources s ON s.id=m.source_id
-        WHERE m.status='new' AND s.kind IN ('pravo','legal_rss','survey_web') AND s.active)
-        OR EXISTS (SELECT 1 FROM runs WHERE service='collector' AND status IN ('started','running')
-            AND started_at > now()-interval '30 minutes')""").fetchone()[0]
-    if busy:
-        return
-    for (chat_id,) in conn.execute("SELECT chat_id FROM subscribers").fetchall():
-        sent_recently=conn.execute("""SELECT EXISTS (SELECT 1 FROM finding_deliveries
-            WHERE chat_id=%s AND sent_at > now()-interval '1 hour')""",(chat_id,)).fetchone()[0]
-        if sent_recently:
-            continue
-        rows = conn.execute("""SELECT f.id,f.summary,f.entity,m.url,s.name,m.published_at,m.content_kind,m.usefulness
-            FROM legal_findings f JOIN materials m ON m.id=f.material_id
-            JOIN sources s ON s.id=m.source_id
-            JOIN subscribers sub ON sub.chat_id=%s
-            WHERE f.created_at >= sub.started_at AND NOT EXISTS (
-                SELECT 1 FROM finding_deliveries d WHERE d.finding_id=f.id AND d.chat_id=sub.chat_id)
-            ORDER BY row_number() OVER (PARTITION BY s.id ORDER BY m.published_at DESC NULLS LAST,f.id),
-                     m.published_at DESC NULLS LAST,f.id LIMIT 3""",(chat_id,)).fetchall()
-        for batch in batches(rows):
-            text = "<b>Новости и материалы для онлайн-исследований</b>\n\n"
-            text += "\n\n".join(finding_lines([row[1:] for row in batch],new=True))
-            text += "\n\n«НОВОЕ» — впервые прислано ботом. Дата публикации указана отдельно."
-            try:
-                say(chat_id,text,button=False)
-            except urllib.error.HTTPError as error:
-                if error.code == 403:
-                    conn.execute("DELETE FROM subscribers WHERE chat_id=%s",(chat_id,))
-                db.log(SERVICE,f"Сводка подписчику не доставлена, код {error.code}")
-                break
-            with conn.transaction():
-                for row in batch:
-                    conn.execute("""INSERT INTO finding_deliveries(finding_id,chat_id)
-                        VALUES (%s,%s) ON CONFLICT DO NOTHING""",(row[0],chat_id))
-                    conn.execute("UPDATE findings SET sent_at=coalesce(sent_at,now()) WHERE id=%s",(row[0],))
+def send_new(conn, now=None):
+    from bot.delivery import send_daily
+    return send_daily(conn,say,finding_lines,now=now)
 
 
 def send_weekly_digest(conn, now=None):
-    week_start = weekly_digest_window(now)
-    if week_start is None:
-        return
-    busy = conn.execute("""SELECT EXISTS (
-        SELECT 1 FROM materials m JOIN sources s ON s.id=m.source_id
-        WHERE m.status='new' AND s.kind IN ('pravo','legal_rss','survey_web') AND s.active)
-        OR EXISTS (SELECT 1 FROM runs WHERE service='collector' AND status IN ('started','running')
-            AND started_at > now()-interval '30 minutes')""").fetchone()[0]
-    if busy:
-        return
-    recent_news = conn.execute("""SELECT EXISTS (
-        SELECT 1 FROM legal_findings f JOIN materials m ON m.id=f.material_id
-        WHERE NOT m.is_backfill AND f.created_at >= now()-interval '7 days')""").fetchone()[0]
-    if recent_news:
-        return
-    year_start = datetime(week_start.year, 1, 1, tzinfo=MOSCOW)
-    for (chat_id,) in conn.execute("SELECT chat_id FROM subscribers").fetchall():
-        already_sent = conn.execute("SELECT 1 FROM weekly_digest_runs WHERE chat_id=%s AND week_start=%s",
-                                    (chat_id,week_start)).fetchone()
-        if already_sent:
-            continue
-        if conn.execute("""SELECT EXISTS (SELECT 1 FROM finding_deliveries
-            WHERE chat_id=%s AND sent_at > now()-interval '1 hour')""",(chat_id,)).fetchone()[0]:
-            continue
-        rows = conn.execute("""SELECT f.id,f.summary,f.entity,m.url,s.name,m.published_at,m.content_kind,m.usefulness
-            FROM legal_findings f JOIN materials m ON m.id=f.material_id
-            JOIN sources s ON s.id=m.source_id
-            WHERE m.is_backfill AND m.published_at >= %s
-              AND NOT EXISTS (SELECT 1 FROM finding_deliveries d
-                              WHERE d.finding_id=f.id AND d.chat_id=%s)
-            ORDER BY m.published_at DESC NULLS LAST,f.id DESC LIMIT %s""",
-            (year_start,chat_id,LATEST)).fetchall()
-        if not rows:
-            # No publication means no digest. Do not mark the week as delivered:
-            # a later successful collection may still provide useful material.
-            continue
-        text = "<b>Из архива правовых публикаций</b>\n\n" + "\n\n".join(finding_lines([row[1:] for row in rows],new=True))
-        try:
-            say(chat_id,text,button=False)
-        except urllib.error.HTTPError as error:
-            if error.code == 403:
-                conn.execute("DELETE FROM subscribers WHERE chat_id=%s",(chat_id,))
-            db.log(SERVICE,f"Еженедельный дайджест подписчику не доставлен, код {error.code}")
-            continue
-        with conn.transaction():
-            for row in rows:
-                conn.execute("""INSERT INTO finding_deliveries(finding_id,chat_id)
-                    VALUES (%s,%s) ON CONFLICT DO NOTHING""",(row[0],chat_id))
-            conn.execute("""INSERT INTO weekly_digest_runs(chat_id,week_start,item_count)
-                VALUES (%s,%s,%s) ON CONFLICT DO NOTHING""",(chat_id,week_start,len(rows)))
+    """Retired: all automatic materials use the single daily window."""
+    return
 
 
 def status_text(conn):
@@ -244,7 +161,6 @@ def status_text(conn):
     for service, name in (
         ("collector", "Сбор"),
         ("worker", "Разбор"),
-        ("bot", "Рассылка"),
     ):
         run = conn.execute(
             "SELECT started_at, status, note FROM runs WHERE service = %s ORDER BY id DESC LIMIT 1",
@@ -268,6 +184,17 @@ def status_text(conn):
         WHERE c.run_id=(SELECT max(run_id) FROM source_checks) ORDER BY s.name""").fetchall()
     for name,discovered,checked,accepted,failed in checks:
         lines.append(f'{html.escape(name)}: найдено ссылок {discovered}, прочитано {checked}, подошло {accepted}, ошибок {failed}.')
+    last=conn.execute('SELECT max(sent_at) FROM daily_digest_items WHERE sent_at IS NOT NULL').fetchone()[0]
+    lines.append('Последняя реальная доставка: '+(last.astimezone(MOSCOW).strftime('%d.%m %H:%M МСК') if last else 'ещё не было по новой схеме'))
+    state=conn.execute('SELECT note FROM digest_state WHERE id=1').fetchone()
+    if state:
+        lines.append('Проверка доставки: '+html.escape(db.redact(state[0])))
+    from bot.delivery import next_window, delivery_day
+    current=datetime.now(timezone.utc)
+    if delivery_day(current):
+        lines.append('Сейчас окно доставки: до 13:15 МСК')
+    else:
+        lines.append('Ближайшая подборка: '+next_window(current).strftime('%d.%m %H:%M МСК'))
     return "\n".join(lines)
 
 
@@ -284,7 +211,7 @@ def handle(conn, message):
             "INSERT INTO subscribers (chat_id, name) VALUES (%s, %s) ON CONFLICT (chat_id) DO NOTHING",
             (chat["id"], name),
         )
-        text = "Готово, вы подписаны на новости и полезные материалы об онлайн-исследованиях: опросы, респонденты, инструменты, безопасность и персональные данные. Присылаем до трёх ещё не показанных материалов не чаще раза в час. «НОВОЕ» означает впервые присланный материал; дата его публикации показана отдельно. Пустые подборки не отправляем."
+        text = "Вы подписаны на правовые риски, приватность и безопасность онлайн-опросов при работе из России. Подборка ежедневно в 13:00 МСК, до пяти материалов; при задержке — до 13:15, позже только на следующий день. Пустых подборок нет. «НОВОЕ» — только новости с подтверждённой датой не старше 72 часов. Методологию не присылаем."
         text += "\n\n/latest — последние публикации. /status — состояние обновлений. /stop — отписаться."
         say(chat["id"], text)
         db.log(SERVICE, "подписка активирована")
@@ -292,10 +219,10 @@ def handle(conn, message):
         conn.execute("DELETE FROM subscribers WHERE chat_id=%s",(chat["id"],))
         say(chat["id"],"Вы отписались от новостей. /start — подписаться снова.",button=False)
     elif command == "/latest":
-        rows = conn.execute("""SELECT f.summary,f.entity,m.url,s.name,m.published_at,m.content_kind,m.usefulness FROM legal_findings f
+        rows = conn.execute("""SELECT f.summary,f.entity,m.url,s.name,m.published_at,m.content_kind,m.usefulness,m.risk_excerpt,m.audience FROM legal_findings f
             JOIN materials m ON m.id=f.material_id JOIN sources s ON s.id=m.source_id
             ORDER BY f.created_at DESC,f.id DESC LIMIT 3""").fetchall()
-        text = "<b>Последние найденные материалы</b>\n\n" + "\n\n".join(finding_lines(rows)) if rows else "Подходящих материалов пока нет. /status — состояние сбора и источников."
+        text = "<b>Правовые риски: последние материалы</b>\n\n" + "\n\n".join(finding_lines(rows)) if rows else "Подходящих материалов пока нет. /status — состояние сбора и источников."
         say(chat["id"],text,button=False)
     elif command == "/status":
         say(chat["id"], status_text(conn))
@@ -335,9 +262,7 @@ def send_forever():
     while True:
         try:
             with db.connect() as conn:
-                send_source_events(conn)
                 send_new(conn)
-                send_weekly_digest(conn)
         except Exception as error:
             db.log(SERVICE, f"рассылка не прошла: {error}")
         time.sleep(SEND_EVERY_SECONDS)

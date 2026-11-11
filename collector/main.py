@@ -41,8 +41,12 @@ def main():
             db.log(SERVICE, 'Предыдущий сбор ещё работает')
             return
         catalog = {source['url']: source for source in survey_sources()}
+        # Do not let retired generic blogs remain active in an existing database.
+        for (old_id, old_url) in conn.execute("SELECT id,url FROM sources WHERE kind='survey_web'").fetchall():
+            if old_url not in catalog:
+                conn.execute('UPDATE sources SET active=FALSE WHERE id=%s',(old_id,))
         for source in catalog.values():
-            conn.execute("INSERT INTO sources(name,kind,url) VALUES (%s,'survey_web',%s) ON CONFLICT(name) DO NOTHING",
+            conn.execute("INSERT INTO sources(name,kind,url) VALUES (%s,'survey_web',%s) ON CONFLICT(name) DO UPDATE SET url=EXCLUDED.url,active=TRUE",
                          (source['name'],source['url']))
         run_id = db.start_run(conn, SERVICE)
         total, failures, partial_sources = 0, [], []
@@ -101,8 +105,8 @@ def main():
                                     conn.execute('UPDATE materials SET is_backfill=TRUE WHERE id=%s',(material_id,))
                                 if kind == 'survey_web':
                                     conn.execute("""UPDATE materials SET title=%s,text=%s,published_at=%s,content_kind=%s,usefulness=%s,status='new'
-                                        WHERE id=%s AND (title IS DISTINCT FROM %s OR text IS DISTINCT FROM %s)""",
-                                        (item['title'],item['text'],item['published_at'],item['content_kind'],item['usefulness'],material_id,item['title'],item['text']))
+                                        WHERE id=%s AND (title IS DISTINCT FROM %s OR text IS DISTINCT FROM %s OR published_at IS DISTINCT FROM %s)""",
+                                        (item['title'],item['text'],item['published_at'],item['content_kind'],item['usefulness'],material_id,item['title'],item['text'],item['published_at']))
                             conn.execute('INSERT INTO material_mentions(material_id,source_id,url) VALUES (%s,%s,%s) ON CONFLICT(source_id,url) DO NOTHING',(material_id,source_id,item['url']))
                             metadata = json.dumps(item['metadata'],ensure_ascii=False,sort_keys=True)
                             conn.execute('''INSERT INTO material_snapshots(material_id,digest,metadata)
