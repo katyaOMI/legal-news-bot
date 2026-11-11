@@ -147,3 +147,40 @@ CREATE TABLE IF NOT EXISTS source_checks (
  errors INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(run_id,source_id)
 );
+
+-- Privacy-risk v2: append-only migration; keep subscribers and old deliveries.
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS evaluation_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS accepted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS evaluation_reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS risk_excerpt TEXT NOT NULL DEFAULT '';
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS audience TEXT NOT NULL DEFAULT '';
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS risk_priority INTEGER NOT NULL DEFAULT 0;
+CREATE OR REPLACE VIEW legal_findings AS
+ SELECT f.* FROM findings f JOIN materials m ON m.id=f.material_id
+ JOIN sources s ON s.id=m.source_id
+ WHERE s.kind IN ('pravo','legal_rss','survey_web') AND s.active
+ AND m.accepted AND m.evaluation_version='privacy-risk-v2' AND m.status='done';
+
+CREATE TABLE IF NOT EXISTS daily_digest_runs (
+ chat_id BIGINT NOT NULL REFERENCES subscribers(chat_id) ON DELETE CASCADE,
+ delivery_date DATE NOT NULL,
+ status TEXT NOT NULL DEFAULT 'pending',
+ completed_at TIMESTAMPTZ,
+ PRIMARY KEY(chat_id,delivery_date)
+);
+CREATE TABLE IF NOT EXISTS daily_digest_items (
+ chat_id BIGINT NOT NULL,
+ delivery_date DATE NOT NULL,
+ finding_id INTEGER NOT NULL REFERENCES findings(id),
+ position INTEGER NOT NULL,
+ sent_at TIMESTAMPTZ,
+ cancelled BOOLEAN NOT NULL DEFAULT FALSE,
+ PRIMARY KEY(chat_id,delivery_date,finding_id),
+ FOREIGN KEY(chat_id,delivery_date) REFERENCES daily_digest_runs(chat_id,delivery_date) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS digest_state (
+ id INTEGER PRIMARY KEY CHECK(id=1),
+ checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ note TEXT NOT NULL
+);
+INSERT INTO sources(name,kind,url) VALUES ('Касперский: блог безопасности','legal_rss','https://www.kaspersky.ru/blog/feed/') ON CONFLICT(name) DO NOTHING;
