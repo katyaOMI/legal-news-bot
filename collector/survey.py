@@ -5,7 +5,7 @@ import re
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -22,50 +22,8 @@ def sources():
 
 
 def classify_material(title, description=''):
-    """Explain topic matches; general data regulation is relevant without 'survey'."""
-    title = clean(title).lower().replace('ё', 'е')
-    text = (title + ' ' + clean(description)[:4000]).lower().replace('ё', 'е')
-    # Owner feedback T4: sample-size calculations are outside this digest.
-    if re.search(r'сколько\s+(?:респондент|человек)|(?:размер|объем|численност)\w*\s+выборк|расчет\w*\s+(?:количеств\w*\s+)?респондент',title):
-        return None
-    survey = re.search(r'опрос|анкет|респондент|\bnps\b|\benps\b|\bcustdev\b|survey|questionnaire|маркетингов\w* исследован', text)
-    data = re.search(r'персональн\w* данн|152[‑–—-]фз|обезличиван|трансграничн\w* передач', text)
-    # Avoid short generic pages, results-only headlines and unrelated data science.
-    if not survey and not data:
-        return None
-    title_signal = re.search(r'опрос|анкет|респондент|\bnps\b|\bcustdev\b|survey|исследован|персональн\w* данн|152[‑–—-]фз',title)
-    if not title_signal and not re.search(r'персональн\w* данн|трансграничн\w* передач',text[:700]):
-        if len(re.findall(r'опрос|анкет|респондент|\bnps\b|survey',text)) < 2:
-            return None
-    if re.search(r'^(?:результаты|итоги) (?:голосования|опроса)', title) and not data:
-        return None
-    if re.search(r'заработ(?:ать|ок).*опрос|опрос.*заработ', title) and not re.search(r'безопас|мошен|риск|защит', text):
-        return None
-    topics = []
-    if data:
-        topics.append('Персональные данные')
-    if survey and re.search(r'безопас|мошен|конфиденц|анонимн|защит|утечк', text):
-        topics.append('Безопасность опросов')
-    if survey and re.search(r'сервис|платформ|конструктор|форм[аыу]|инструмент|google forms|гугл', text):
-        topics.append('Инструменты опросов')
-    if survey:
-        topics.append('Методика исследований')
-    if re.search(r'федеральный закон|постановление|приказ|152-фз', title):
-        kind = 'document'
-    elif re.search(r'обзор|сервис|платформ|конструктор|инструмент', title):
-        kind = 'review'
-    elif re.search(r'как |зачем |метод|анкет|опрос', title):
-        kind = 'guide'
-    else:
-        kind = 'article'
-    benefits = {
-        'Персональные данные': 'Помогает разобраться с требованиями к сбору, хранению и использованию данных.',
-        'Безопасность опросов': 'О рисках для участников и защите данных при проведении опросов.',
-        'Инструменты опросов': 'Помогает выбрать или настроить инструмент для анкетирования.',
-        'Методика исследований': 'Помогает подготовить исследование, анкету или работу с респондентами.',
-    }
-    preferred = next((t for t in topics if t != 'Персональные данные'), topics[0])
-    return dict(topics=topics, content_kind=kind, usefulness=benefits[preferred])
+    from legal_news.relevance import verdict
+    return verdict(title, description)
 
 
 class Page(HTMLParser):
@@ -128,7 +86,7 @@ def page_date(meta):
             continue
         try:
             moment = datetime.fromisoformat(value.replace('Z','+00:00'))
-            return moment.replace(tzinfo=moment.tzinfo or timezone.utc).isoformat()
+            return moment.replace(tzinfo=moment.tzinfo or timezone(timedelta(hours=3))).isoformat()
         except ValueError:
             continue
     return None
