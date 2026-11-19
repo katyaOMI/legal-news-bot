@@ -1,6 +1,7 @@
 """Persistent daily batches. No Telegram calls outside the Moscow window."""
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
+from legal_news.relevance import VERSION
 
 MOSCOW = ZoneInfo('Europe/Moscow')
 LIMIT = 5
@@ -37,9 +38,9 @@ def send_daily(conn, send, render, now=None):
     try:
         busy = conn.execute('''SELECT EXISTS(SELECT 1 FROM materials m JOIN sources s ON s.id=m.source_id
             WHERE s.active AND s.kind IN ('pravo','legal_rss','survey_web')
-            AND (m.status='new' OR m.evaluation_version<>'privacy-risk-v2'))
+            AND (m.status='new' OR m.evaluation_version<>%s))
             OR EXISTS(SELECT 1 FROM runs WHERE service='collector' AND status IN ('started','running')
-            AND started_at>now()-interval '30 minutes')''').fetchone()[0]
+            AND started_at>now()-interval '30 minutes')''',(VERSION,)).fetchone()[0]
         if busy:
             note(conn,'Ожидание завершения сбора или переоценки очереди')
             return
@@ -83,7 +84,7 @@ def send_daily(conn, send, render, now=None):
                         WHERE chat_id=%s AND delivery_date=%s AND finding_id=%s''',(chat_id,day,finding_id))
                     continue
                 # Every card is a separately acknowledged part (at most five/day).
-                text = '<b>Правовые риски и безопасность опросов</b>\n\n' + render([row],now=current())[0]
+                text = '<b>Личные данные в интернете</b>\n\n' + render([row],now=current())[0]
                 if delivery_day(current()) != day:
                     return
                 try:

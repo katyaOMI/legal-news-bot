@@ -13,6 +13,13 @@ def xml(title='Новый порядок',description='Обработка пер
 
 
 class FreeRSSCheck(unittest.TestCase):
+    def test_subscriber_teasers_and_webinar_ads_are_not_editorial_inputs(self):
+        self.assertEqual(parse_rss(xml(title='Фишинг в офисных файлах',
+                                      description='Для подписчиков: защита файлов и данных.')), [])
+        self.assertEqual(parse_rss(xml(title='Защита личных данных: приглашаем на вебинар')), [])
+        self.assertEqual(len(parse_rss(xml(title='Как защитить аккаунт',
+                                           description='Рассказываем, как защитить личные данные.'))), 1)
+
     def test_description_participates_in_strict_selection(self):
         rows=parse_rss(xml())
         self.assertIn('Персональные данные',relevant_topics(rows[0]['title'],rows[0]['text']))

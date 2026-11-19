@@ -119,6 +119,10 @@ INSERT INTO sources(name,kind,url) VALUES ('КонсультантПлюс: фе
 INSERT INTO sources(name,kind,url) VALUES ('КонсультантПлюс: новости для юриста','legal_rss','https://www.consultant.ru/rss/nw.xml') ON CONFLICT(name) DO NOTHING;
 INSERT INTO sources(name,kind,url) VALUES ('ГАРАНТ: новости','legal_rss','https://rss.garant.ru/categories/news/') ON CONFLICT(name) DO NOTHING;
 INSERT INTO sources(name,kind,url) VALUES ('ГАРАНТ: федеральные документы','legal_rss','https://rss.garant.ru/hotlaw/federal/') ON CONFLICT(name) DO NOTHING;
+-- Public digital-safety feeds checked locally on 2026-11-19. Preserve history.
+INSERT INTO sources(name,kind,url) VALUES ('SecurityLab: новости','legal_rss','https://www.securitylab.ru/_services/export/rss/news/') ON CONFLICT(name) DO NOTHING;
+INSERT INTO sources(name,kind,url) VALUES ('Хакер: публикации','legal_rss','https://xakep.ru/feed/') ON CONFLICT(name) DO NOTHING;
+INSERT INTO sources(name,kind,url) VALUES ('Хабр: информационная безопасность','legal_rss','https://habr.com/ru/rss/hub/infosecurity/all/?fl=ru') ON CONFLICT(name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS weekly_digest_runs (
  chat_id BIGINT NOT NULL REFERENCES subscribers(chat_id) ON DELETE CASCADE,
@@ -159,7 +163,7 @@ CREATE OR REPLACE VIEW legal_findings AS
  SELECT f.* FROM findings f JOIN materials m ON m.id=f.material_id
  JOIN sources s ON s.id=m.source_id
  WHERE s.kind IN ('pravo','legal_rss','survey_web') AND s.active
- AND m.accepted AND m.evaluation_version='privacy-risk-v2' AND m.status='done';
+ AND m.accepted AND m.evaluation_version='personal-data-v2.2' AND m.status='done';
 
 CREATE TABLE IF NOT EXISTS daily_digest_runs (
  chat_id BIGINT NOT NULL REFERENCES subscribers(chat_id) ON DELETE CASCADE,
