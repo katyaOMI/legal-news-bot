@@ -211,7 +211,7 @@ def handle(conn, message):
             "INSERT INTO subscribers (chat_id, name) VALUES (%s, %s) ON CONFLICT (chat_id) DO NOTHING",
             (chat["id"], name),
         )
-        text = "Вы подписаны на правовые риски, приватность и безопасность онлайн-опросов при работе из России. Подборка ежедневно в 13:00 МСК, до пяти материалов; при задержке — до 13:15, позже только на следующий день. Пустых подборок нет. «НОВОЕ» — только новости с подтверждённой датой не старше 72 часов. Методологию не присылаем."
+        text = "Вы подписаны на материалы о личных данных в интернете: что собирают сайты и программы, согласия, приватность и правила обработки данных. Подборка ежедневно в 13:00 МСК, до пяти материалов; при задержке — до 13:15, позже только на следующий день. Пустых подборок нет. «НОВОЕ» — только новости с подтверждённой датой не старше 72 часов. Методологию не присылаем."
         text += "\n\n/latest — последние публикации. /status — состояние обновлений. /stop — отписаться."
         say(chat["id"], text)
         db.log(SERVICE, "подписка активирована")
@@ -222,7 +222,7 @@ def handle(conn, message):
         rows = conn.execute("""SELECT f.summary,f.entity,m.url,s.name,m.published_at,m.content_kind,m.usefulness,m.risk_excerpt,m.audience FROM legal_findings f
             JOIN materials m ON m.id=f.material_id JOIN sources s ON s.id=m.source_id
             ORDER BY f.created_at DESC,f.id DESC LIMIT 3""").fetchall()
-        text = "<b>Правовые риски: последние материалы</b>\n\n" + "\n\n".join(finding_lines(rows)) if rows else "Подходящих материалов пока нет. /status — состояние сбора и источников."
+        text = "<b>Личные данные: последние материалы</b>\n\n" + "\n\n".join(finding_lines(rows)) if rows else "Подходящих материалов пока нет. /status — состояние сбора и источников."
         say(chat["id"],text,button=False)
     elif command == "/status":
         say(chat["id"], status_text(conn))

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import uuid
 from unittest.mock import patch
+from legal_news.relevance import VERSION
 
 
 def run():
@@ -26,7 +27,15 @@ def run():
                 conn.execute('''INSERT INTO materials(source_id,title,text,url,published_at)
                     VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''',
                     (sid,item['title'],item.get('text',''),item['url'],item.get('published_at')))
-        process_new(conn)
+        # Fresh expanded feeds can exceed a single worker batch. Drain the
+        # fixture queue just as the real worker does over successive passes.
+        pending_sql = "SELECT count(*) FROM materials WHERE status='new' OR evaluation_version<>%s"
+        pending = conn.execute(pending_sql, (VERSION,)).fetchone()[0]
+        while pending:
+            process_new(conn)
+            remaining = conn.execute(pending_sql, (VERSION,)).fetchone()[0]
+            assert remaining < pending, 'Local replay worker made no progress'
+            pending = remaining
         count=conn.execute('SELECT count(*) FROM legal_findings').fetchone()[0]
         assert count==expected,(count,expected)
         when=datetime.now(timezone.utc).replace(hour=10,minute=0,second=0,microsecond=0)
@@ -34,7 +43,8 @@ def run():
         with patch.object(bot,'say',lambda chat,text,button=False:messages.append(text)):
             bot.send_new(conn,when)
             bot.send_new(conn,when)
-        assert len(messages)==min(expected,5)
+        assert len(messages)==min(expected,5), dict(expected=min(expected,5), actual=len(messages),
+            note=conn.execute('SELECT note FROM digest_state WHERE id=1').fetchone())
         assert len(messages)==len(set(messages))
         assert conn.execute('SELECT count(*) FROM finding_deliveries').fetchone()[0]==len(messages)
         result=dict(accepted=count,rejected=conn.execute('SELECT count(*) FROM materials WHERE NOT accepted').fetchone()[0],

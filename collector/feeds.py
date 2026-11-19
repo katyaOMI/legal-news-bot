@@ -11,6 +11,9 @@ from legal_news.core import clean, topics_for
 
 SOURCES = [
     ('Касперский: блог безопасности', 'https://www.kaspersky.ru/blog/feed/'),
+    ('SecurityLab: новости', 'https://www.securitylab.ru/_services/export/rss/news/'),
+    ('Хакер: публикации', 'https://xakep.ru/feed/'),
+    ('Хабр: информационная безопасность', 'https://habr.com/ru/rss/hub/infosecurity/all/?fl=ru'),
     ('КонсультантПлюс: горячие документы', 'https://www.consultant.ru/rss/hotdocs.xml'),
     ('КонсультантПлюс: федеральное законодательство', 'https://www.consultant.ru/rss/fd.xml'),
     ('КонсультантПлюс: новости для юриста', 'https://www.consultant.ru/rss/nw.xml'),
@@ -67,6 +70,11 @@ def parse_rss(body, since=None):
         title=clean(element.findtext('title'))
         raw_description=element.findtext('description') or ''
         description=clean(raw_description)
+        # Only public editorial excerpts: do not promote a subscriber teaser or
+        # a webinar advertisement as a readable safety publication.
+        if re.match(r'^для подписчиков\b', description.lower()) or re.search(
+                r'\bвебинар\w*\b', title.lower()):
+            continue
         link=canonical_url(element.findtext('link') or '')
         raw_date=element.findtext('pubDate')
         if not title or not raw_date:
