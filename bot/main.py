@@ -221,7 +221,7 @@ def handle(conn, message):
     elif command == "/latest":
         rows = conn.execute("""SELECT f.summary,f.entity,m.url,s.name,m.published_at,m.content_kind,m.usefulness,m.risk_excerpt,m.audience FROM legal_findings f
             JOIN materials m ON m.id=f.material_id JOIN sources s ON s.id=m.source_id
-            ORDER BY f.created_at DESC,f.id DESC LIMIT 3""").fetchall()
+            ORDER BY m.published_at DESC NULLS LAST,f.created_at DESC,f.id DESC LIMIT 3""").fetchall()
         text = "<b>Личные данные: последние материалы</b>\n\n" + "\n\n".join(finding_lines(rows)) if rows else "Подходящих материалов пока нет. /status — состояние сбора и источников."
         say(chat["id"],text,button=False)
     elif command == "/status":
