@@ -163,7 +163,7 @@ CREATE OR REPLACE VIEW legal_findings AS
  SELECT f.* FROM findings f JOIN materials m ON m.id=f.material_id
  JOIN sources s ON s.id=m.source_id
  WHERE s.kind IN ('pravo','legal_rss','survey_web') AND s.active
- AND m.accepted AND m.evaluation_version='personal-data-v2.2' AND m.status='done';
+ AND m.accepted AND m.evaluation_version='personal-data-v2.2.1' AND m.status='done';
 
 CREATE TABLE IF NOT EXISTS daily_digest_runs (
  chat_id BIGINT NOT NULL REFERENCES subscribers(chat_id) ON DELETE CASCADE,

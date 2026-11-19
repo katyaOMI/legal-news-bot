@@ -4,7 +4,7 @@ import re
 from legal_news.core import clean
 from legal_news.personal_data import focus
 
-VERSION = 'personal-data-v2.2'
+VERSION = 'personal-data-v2.2.1'
 DATA = r'персональн\w*\s+данн|личн\w* (?:информац|данн)|152[‑–—-]\s*фз|субъект\w*\s+данн|personal data|data protection'
 SURVEY = r'\bопрос\w*|\bанкет\w*|\bреспондент\w*|\bsurvey\b|\bquestionnaire\b|\btypeform\b|\btestograf\b|\bанкетолог\b|google forms|яндекс форм'
 SAFETY = r'\bбезопас|\bконфиденц|\bприватност|\bфишинг|\bмошен|\bутечк|\bзащит|\bлокализац|\bтрансграничн|\bсогласи|\bprivacy\b|\bphishing\b|\bbreach\b|шифровальщик|вымогател|вредонос|уязвим|взлом|заражен|краж\w* (?:файл|данн|парол)'
@@ -27,6 +27,10 @@ def evaluate(title, description=''):
     def has(pattern, value=text):
         return bool(re.search(pattern, value))
     rejected = dict(accepted=False, reason='Нет содержательной связи с приватностью, безопасностью или доступностью цифровых сервисов', version=VERSION)
+    survey_announcement = has(r'\b(?:запустил\w*|проводит|проводят|начал\w*|начался|анонсир\w*|приглаша\w*)\b.{0,70}\bопрос\w*|пройти\s+опрос', headline)
+    survey_attack = has(r'фишинг|поддельн\w*\s+(?:сайт|опрос|анкет)|крад\w*', lead)
+    if survey_announcement and not survey_attack:
+        return rejected | dict(reason='Анонс исследования или опроса, а не разбор защиты данных участников')
     foreign = has(r'\bgdpr\b|евросоюз|европейск\w* союз|\bccpa\b|калифорни|\buk\b|\beu\b|\bсша\b|\bес\b|британи|германи|франци', lead)
     russian = has(r'росси|\bрф\b|роскомнадзор|\bркн\b|152[‑–—-]|из россии|российск', lead)
     foreign_law = has(r'\bgdpr\b|\bccpa\b|штраф|\bсуд\w*|закон|регулятор|обязан', lead)
